@@ -18,7 +18,7 @@ func TestFactorySendsWithNamedRobot(t *testing.T) {
 	defer serverA.Close()
 	serverB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sentToB++
-		var payload feishuMessage
+		var payload testMessagePayload
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Fatal(err)
 		}

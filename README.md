@@ -115,3 +115,9 @@ if err != nil {
 	return err
 }
 ```
+
+## 结构边界
+
+- 根包只暴露调用方需要的 `Client`、`Factory`、`Message`、`Segment`。
+- `internal/feishu` 封装飞书 webhook 协议、签名、HTTP 响应解析。
+- 当前最小支持 `post` 富文本消息；飞书卡片可通过自定义机器人发送，后续应独立增加 `Card` / `SendCard`，不和 `Message` 混用。

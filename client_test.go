@@ -12,7 +12,7 @@ import (
 )
 
 func TestClientSendPostMessage(t *testing.T) {
-	var payload feishuMessage
+	var payload testMessagePayload
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s", r.Method)
@@ -61,7 +61,7 @@ func TestClientSendPostMessage(t *testing.T) {
 }
 
 func TestClientSendWithoutSecret(t *testing.T) {
-	var payload feishuMessage
+	var payload testMessagePayload
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Fatal(err)
@@ -83,7 +83,7 @@ func TestClientSendWithoutSecret(t *testing.T) {
 }
 
 func TestClientSendUsesLocaleAndTruncatesTitle(t *testing.T) {
-	var payload feishuMessage
+	var payload testMessagePayload
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Fatal(err)
@@ -110,7 +110,7 @@ func TestClientSendUsesLocaleAndTruncatesTitle(t *testing.T) {
 }
 
 func TestClientSendRichParagraphs(t *testing.T) {
-	var payload feishuMessage
+	var payload testMessagePayload
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Fatal(err)
@@ -218,4 +218,20 @@ func TestSecretSign(t *testing.T) {
 	if sign != "fiWS2+gh28DOydAv7hzONH/mDn9+b1Y4Y5ivXWXy8vA=" {
 		t.Fatalf("sign = %s", sign)
 	}
+}
+
+type testMessagePayload struct {
+	MsgType   string             `json:"msg_type"`
+	Content   testContentPayload `json:"content"`
+	Timestamp string             `json:"timestamp,omitempty"`
+	Sign      string             `json:"sign,omitempty"`
+}
+
+type testContentPayload struct {
+	Post map[string]testPostPayload `json:"post"`
+}
+
+type testPostPayload struct {
+	Title   string      `json:"title"`
+	Content []Paragraph `json:"content"`
 }

@@ -1,38 +1,35 @@
 package feishunotice
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/neteast-software/feishu-notice/internal/feishu"
 )
 
-const (
-	defaultHTTPTimeout = 10 * time.Second
-	defaultLocale      = "zh_cn"
-	maxTitleLength     = 120
-)
+const defaultHTTPTimeout = 10 * time.Second
 
 // Client sends messages to a Feishu custom robot webhook.
 type Client struct {
+	sender *feishu.Client
+}
+
+type clientConfig struct {
 	webhookURL string
-	secret     Secret
+	secret     string
 	httpClient *http.Client
 	now        func() time.Time
 }
 
 // Option customizes Client construction.
-type Option func(*Client)
+type Option func(*clientConfig)
 
 // WithHTTPClient sets the HTTP client used by Client.
 func WithHTTPClient(httpClient *http.Client) Option {
-	return func(c *Client) {
+	return func(c *clientConfig) {
 		if httpClient != nil {
 			c.httpClient = httpClient
 		}
@@ -41,7 +38,7 @@ func WithHTTPClient(httpClient *http.Client) Option {
 
 // WithTimeout sets the timeout on the default HTTP client.
 func WithTimeout(timeout time.Duration) Option {
-	return func(c *Client) {
+	return func(c *clientConfig) {
 		if timeout > 0 {
 			c.httpClient = &http.Client{Timeout: timeout}
 		}
@@ -50,7 +47,7 @@ func WithTimeout(timeout time.Duration) Option {
 
 // WithClock sets the clock used for request signing.
 func WithClock(now func() time.Time) Option {
-	return func(c *Client) {
+	return func(c *clientConfig) {
 		if now != nil {
 			c.now = now
 		}
@@ -59,223 +56,35 @@ func WithClock(now func() time.Time) Option {
 
 // NewClient creates a Feishu webhook client.
 func NewClient(webhookURL string, secret string, options ...Option) (*Client, error) {
-	c := &Client{
+	config := clientConfig{
 		webhookURL: strings.TrimSpace(webhookURL),
-		secret:     Secret(strings.TrimSpace(secret)),
+		secret:     strings.TrimSpace(secret),
 		httpClient: &http.Client{Timeout: defaultHTTPTimeout},
 		now:        time.Now,
 	}
 	for _, option := range options {
 		if option != nil {
-			option(c)
+			option(&config)
 		}
 	}
-	if c.webhookURL == "" {
-		return nil, errors.New("webhook url is required")
+	sender, err := feishu.NewClient(config.webhookURL, config.secret, config.httpClient, config.now)
+	if err != nil {
+		return nil, err
 	}
-	if c.httpClient == nil {
-		c.httpClient = &http.Client{Timeout: defaultHTTPTimeout}
-	}
-	return c, nil
-}
-
-// Message is a rich-text post message for Feishu.
-type Message struct {
-	Title      string
-	Lines      []string
-	Paragraphs []Paragraph
-	Locale     Locale
-}
-
-// Paragraph is one paragraph in a Feishu post message.
-type Paragraph []Segment
-
-// SegmentTag is the Feishu post rich-text node type in the JSON tag field.
-type SegmentTag string
-
-const (
-	// TagText renders plain text.
-	TagText SegmentTag = "text"
-	// TagLink renders a hyperlink.
-	TagLink SegmentTag = "a"
-	// TagAt mentions a user or all members.
-	TagAt SegmentTag = "at"
-	// TagImage renders an uploaded Feishu image.
-	TagImage SegmentTag = "img"
-)
-
-// Segment is one Feishu post rich-text node.
-type Segment struct {
-	Tag      SegmentTag `json:"tag"`
-	Text     string     `json:"text,omitempty"`
-	Href     string     `json:"href,omitempty"`
-	UserID   string     `json:"user_id,omitempty"`
-	UserName string     `json:"user_name,omitempty"`
-	ImageKey string     `json:"image_key,omitempty"`
-	UnEscape *bool      `json:"un_escape,omitempty"`
-}
-
-// Text returns a text segment.
-func Text(text string) Segment {
-	return Segment{Tag: TagText, Text: text}
-}
-
-// Link returns a hyperlink segment.
-func Link(text string, href string) Segment {
-	return Segment{Tag: TagLink, Text: text, Href: href}
-}
-
-// At returns a mention segment. Use userID all to mention everyone.
-func At(userID string, userName string) Segment {
-	return Segment{Tag: TagAt, UserID: userID, UserName: userName}
-}
-
-// Image returns an image segment.
-func Image(imageKey string) Segment {
-	return Segment{Tag: TagImage, ImageKey: imageKey}
-}
-
-// Locale is a Feishu post locale key, for example zh_cn or en_us.
-type Locale string
-
-// String returns the locale value.
-func (l Locale) String() string {
-	if strings.TrimSpace(string(l)) == "" {
-		return defaultLocale
-	}
-	return strings.TrimSpace(string(l))
-}
-
-// Validate checks whether the message can be sent.
-func (m Message) Validate() error {
-	if strings.TrimSpace(m.Title) == "" {
-		return errors.New("message title is required")
-	}
-	return nil
+	return &Client{sender: sender}, nil
 }
 
 // Send sends a post message to the configured webhook.
 func (c *Client) Send(ctx context.Context, message Message) error {
-	if c == nil {
+	if c == nil || c.sender == nil {
 		return errors.New("client is nil")
 	}
 	if err := message.Validate(); err != nil {
 		return err
 	}
-
-	payload := feishuMessage{
-		MsgType: "post",
-		Content: feishuContent{
-			Post: map[string]feishuPost{
-				message.Locale.String(): {
-					Title:   truncate(message.Title, maxTitleLength),
-					Content: message.segments(),
-				},
-			},
-		},
-	}
-	if c.secret != "" {
-		timestamp := strconv.FormatInt(c.now().Unix(), 10)
-		payload.Timestamp = timestamp
-		payload.Sign = c.secret.Sign(timestamp)
-	}
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.webhookURL, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return HTTPError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(respBody))}
-	}
-
-	var result feishuResponse
-	if err := json.Unmarshal(respBody, &result); err == nil && result.Code != 0 {
-		return ResponseError{Code: result.Code, Message: result.Message}
-	}
-	return nil
-}
-
-func (m Message) segments() []Paragraph {
-	if len(m.Paragraphs) > 0 {
-		return m.Paragraphs
-	}
-	content := make([]Paragraph, 0, len(m.Lines))
-	for _, line := range m.Lines {
-		content = append(content, Paragraph{Text(line)})
-	}
-	return content
-}
-
-type feishuMessage struct {
-	MsgType   string        `json:"msg_type"`
-	Content   feishuContent `json:"content"`
-	Timestamp string        `json:"timestamp,omitempty"`
-	Sign      string        `json:"sign,omitempty"`
-}
-
-type feishuContent struct {
-	Post map[string]feishuPost `json:"post"`
-}
-
-type feishuPost struct {
-	Title   string      `json:"title"`
-	Content []Paragraph `json:"content"`
-}
-
-type feishuResponse struct {
-	Code    int    `json:"code"`
-	Message string `json:"msg"`
-}
-
-// HTTPError describes a non-2xx Feishu HTTP response.
-type HTTPError struct {
-	StatusCode int
-	Body       string
-}
-
-func (e HTTPError) Error() string {
-	if e.Body == "" {
-		return fmt.Sprintf("feishu status %d", e.StatusCode)
-	}
-	return fmt.Sprintf("feishu status %d: %s", e.StatusCode, e.Body)
-}
-
-// ResponseError describes a Feishu JSON response whose code is not zero.
-type ResponseError struct {
-	Code    int
-	Message string
-}
-
-func (e ResponseError) Error() string {
-	if e.Message == "" {
-		return fmt.Sprintf("feishu code %d", e.Code)
-	}
-	return fmt.Sprintf("feishu code %d: %s", e.Code, e.Message)
-}
-
-func truncate(value string, maxLength int) string {
-	if maxLength <= 0 {
-		return ""
-	}
-	runes := []rune(value)
-	if len(runes) <= maxLength {
-		return value
-	}
-	return string(runes[:maxLength])
+	return c.sender.SendPost(ctx, feishu.PostMessage{
+		Title:   message.safeTitle(),
+		Locale:  message.Locale.String(),
+		Content: message.feishuContent(),
+	})
 }
