@@ -109,6 +109,47 @@ func TestClientSendUsesLocaleAndTruncatesTitle(t *testing.T) {
 	}
 }
 
+func TestClientSendRichParagraphs(t *testing.T) {
+	var payload feishuMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"code":0,"msg":"ok"}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = client.Send(context.Background(), Message{
+		Title: "发布通知",
+		Paragraphs: []Paragraph{
+			{Text("详情: "), Link("查看", "https://example.com")},
+			{At("all", "所有人")},
+			{Image("img_ecffc3b9-8f14-400f-a014-05eca1a4310g")},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	post := payload.Content.Post["zh_cn"]
+	if post.Content[0][0].Tag != TagText {
+		t.Fatalf("tag = %s", post.Content[0][0].Tag)
+	}
+	if post.Content[0][1].Tag != TagLink || post.Content[0][1].Href != "https://example.com" {
+		t.Fatalf("link segment = %+v", post.Content[0][1])
+	}
+	if post.Content[1][0].Tag != TagAt || post.Content[1][0].UserID != "all" {
+		t.Fatalf("at segment = %+v", post.Content[1][0])
+	}
+	if post.Content[2][0].Tag != TagImage || post.Content[2][0].ImageKey == "" {
+		t.Fatalf("image segment = %+v", post.Content[2][0])
+	}
+}
+
 func TestClientSendHTTPError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "bad gateway", http.StatusBadGateway)

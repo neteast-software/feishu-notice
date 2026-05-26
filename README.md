@@ -45,6 +45,37 @@ func main() {
 
 `secret` 可为空；为空时不会生成 `timestamp` 和 `sign`。
 
+## 富文本
+
+`Lines` 是简化入口；需要链接、@人、图片时使用 `Paragraphs`。
+
+```go
+err = client.Send(context.Background(), feishunotice.Message{
+	Title: "发布通知",
+	Paragraphs: []feishunotice.Paragraph{
+		{
+			feishunotice.Text("详情: "),
+			feishunotice.Link("查看", "https://example.com"),
+		},
+		{
+			feishunotice.At("all", "所有人"),
+		},
+		{
+			feishunotice.Image("img_ecffc3b9-8f14-400f-a014-05eca1a4310g"),
+		},
+	},
+})
+```
+
+`SegmentTag` 对应飞书 `post` 富文本节点里的 JSON `tag` 字段：
+
+| 常量 | 飞书 tag | 含义 |
+|---|---|---|
+| `TagText` | `text` | 文本 |
+| `TagLink` | `a` | 超链接 |
+| `TagAt` | `at` | @人 / @所有人 |
+| `TagImage` | `img` | 图片 |
+
 ## 多机器人
 
 ```go
