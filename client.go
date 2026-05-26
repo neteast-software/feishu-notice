@@ -45,8 +45,7 @@ func WithTimeout(timeout time.Duration) Option {
 	}
 }
 
-// WithClock sets the clock used for request signing.
-func WithClock(now func() time.Time) Option {
+func withClock(now func() time.Time) Option {
 	return func(c *clientConfig) {
 		if now != nil {
 			c.now = now
@@ -77,7 +76,7 @@ func NewClient(webhookURL string, secret string, options ...Option) (*Client, er
 // Send sends a post message to the configured webhook.
 func (c *Client) Send(ctx context.Context, message Message) error {
 	if c == nil || c.sender == nil {
-		return errors.New("client is nil")
+		return errors.New("飞书客户端不能为空")
 	}
 	if err := message.Validate(); err != nil {
 		return err
@@ -87,4 +86,15 @@ func (c *Client) Send(ctx context.Context, message Message) error {
 		Locale:  message.Locale.String(),
 		Content: message.feishuContent(),
 	})
+}
+
+// SendCard sends an interactive card message to the configured webhook.
+func (c *Client) SendCard(ctx context.Context, card Card) error {
+	if c == nil || c.sender == nil {
+		return errors.New("飞书客户端不能为空")
+	}
+	if err := card.Validate(); err != nil {
+		return err
+	}
+	return c.sender.SendCard(ctx, card)
 }

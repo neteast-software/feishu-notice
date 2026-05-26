@@ -45,15 +45,15 @@ func NewFactory(configs ...RobotConfig) (*Factory, error) {
 // Register adds or replaces a robot client.
 func (f *Factory) Register(config RobotConfig) error {
 	if f == nil {
-		return errors.New("factory is nil")
+		return errors.New("飞书机器人工厂不能为空")
 	}
 	name := Robot(config.Name.String())
 	if name == "" {
-		return errors.New("robot name is required")
+		return errors.New("机器人名称不能为空")
 	}
 	client, err := NewClient(config.WebhookURL, config.Secret, config.Options...)
 	if err != nil {
-		return fmt.Errorf("robot %s: %w", name, err)
+		return fmt.Errorf("机器人 %s: %w", name, err)
 	}
 
 	f.mu.Lock()
@@ -65,8 +65,7 @@ func (f *Factory) Register(config RobotConfig) error {
 	return nil
 }
 
-// Client returns the registered client by robot name.
-func (f *Factory) Client(name Robot) (*Client, bool) {
+func (f *Factory) client(name Robot) (*Client, bool) {
 	if f == nil {
 		return nil, false
 	}
@@ -76,22 +75,30 @@ func (f *Factory) Client(name Robot) (*Client, bool) {
 	return client, exists
 }
 
-// MustClient returns the registered client by robot name or an error.
-func (f *Factory) MustClient(name Robot) (*Client, error) {
-	client, exists := f.Client(name)
+func (f *Factory) mustClient(name Robot) (*Client, error) {
+	client, exists := f.client(name)
 	if !exists {
-		return nil, fmt.Errorf("robot %s is not registered", name.String())
+		return nil, fmt.Errorf("机器人 %s 未注册", name.String())
 	}
 	return client, nil
 }
 
 // Send sends a message with the named robot.
 func (f *Factory) Send(ctx context.Context, name Robot, message Message) error {
-	client, err := f.MustClient(name)
+	client, err := f.mustClient(name)
 	if err != nil {
 		return err
 	}
 	return client.Send(ctx, message)
+}
+
+// SendCard sends an interactive card message with the named robot.
+func (f *Factory) SendCard(ctx context.Context, name Robot, card Card) error {
+	client, err := f.mustClient(name)
+	if err != nil {
+		return err
+	}
+	return client.SendCard(ctx, card)
 }
 
 // Robots returns registered robot names in stable order.

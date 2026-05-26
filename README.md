@@ -1,6 +1,15 @@
 # feishu-notice
 
-统一封装飞书自定义机器人消息通知。
+Go package for Feishu custom robot notifications.
+
+## 能力
+
+- 单机器人：`NewClient(webhookURL, secret, options...)`
+- 多机器人：`NewFactory(RobotConfig...)`
+- 富文本消息：`Message` + `Send`
+- 卡片消息：`Card` + `SendCard`
+- 可选配置：`WithTimeout`、`WithHTTPClient`
+- 错误类型：`HTTPError`、`ResponseError`
 
 ## 安装
 
@@ -8,11 +17,9 @@
 go get github.com/neteast-software/feishu-notice
 ```
 
-## 用法
+## 单机器人
 
 ```go
-package main
-
 import (
 	"context"
 	"time"
@@ -20,34 +27,25 @@ import (
 	feishunotice "github.com/neteast-software/feishu-notice"
 )
 
-func main() {
-	client, err := feishunotice.NewClient(
-		"https://open.feishu.cn/open-apis/bot/v2/hook/xxx",
-		"robot-secret",
-		feishunotice.WithTimeout(10*time.Second),
-	)
-	if err != nil {
-		panic(err)
-	}
-
-	err = client.Send(context.Background(), feishunotice.Message{
-		Title: "服务异常: Example",
-		Lines: []string{
-			"站点: Example",
-			"状态: HTTP 503",
-		},
-	})
-	if err != nil {
-		panic(err)
-	}
+client, err := feishunotice.NewClient(webhookURL, secret, feishunotice.WithTimeout(10*time.Second))
+if err != nil {
+	return err
 }
+
+err = client.Send(ctx, feishunotice.Message{
+	Title: "服务异常: Example",
+	Lines: []string{
+		"站点: Example",
+		"状态: HTTP 503",
+	},
+})
 ```
 
-`secret` 可为空；为空时不会生成 `timestamp` 和 `sign`。
+`secret` 可为空；为空时不签名。
 
 ## 富文本
 
-`Lines` 是简化入口；需要链接、@人、图片时使用 `Paragraphs`。
+`Lines` 是纯文本快捷入口；混排用 `Paragraphs`。
 
 ```go
 err = client.Send(context.Background(), feishunotice.Message{
@@ -61,63 +59,74 @@ err = client.Send(context.Background(), feishunotice.Message{
 			feishunotice.At("all", "所有人"),
 		},
 		{
-			feishunotice.Image("img_ecffc3b9-8f14-400f-a014-05eca1a4310g"),
+			feishunotice.Image("img_xxx"),
 		},
 	},
 })
 ```
 
-`SegmentTag` 对应飞书 `post` 富文本节点里的 JSON `tag` 字段：
+`SegmentTag`:
 
 | 常量 | 飞书 tag | 含义 |
 |---|---|---|
 | `TagText` | `text` | 文本 |
-| `TagLink` | `a` | 超链接 |
-| `TagAt` | `at` | @人 / @所有人 |
+| `TagLink` | `a` | 链接 |
+| `TagAt` | `at` | @ |
 | `TagImage` | `img` | 图片 |
+
+## 卡片
+
+```go
+err = client.SendCard(ctx, feishunotice.Card{
+	"schema": "2.0",
+	"header": map[string]any{
+		"title":    map[string]any{"tag": "plain_text", "content": "服务状态"},
+		"template": "green",
+	},
+	"body": map[string]any{
+		"elements": []any{
+			map[string]any{"tag": "markdown", "content": "**Example** 服务正常"},
+		},
+	},
+})
+```
 
 ## 多机器人
 
 ```go
 factory, err := feishunotice.NewFactory(
-	feishunotice.RobotConfig{
-		Name:       feishunotice.Robot("ops"),
-		WebhookURL: opsWebhookURL,
-		Secret:     opsSecret,
-		Options:    []feishunotice.Option{feishunotice.WithTimeout(10 * time.Second)},
-	},
-	feishunotice.RobotConfig{
-		Name:       feishunotice.Robot("release"),
-		WebhookURL: releaseWebhookURL,
-		Secret:     releaseSecret,
-	},
+	feishunotice.RobotConfig{Name: "ops", WebhookURL: opsWebhookURL, Secret: opsSecret},
+	feishunotice.RobotConfig{Name: "release", WebhookURL: releaseWebhookURL, Secret: releaseSecret},
 )
 if err != nil {
 	return err
 }
 
-err = factory.Send(context.Background(), feishunotice.Robot("ops"), feishunotice.Message{
-	Title: "服务异常: Example",
+err = factory.Send(ctx, "ops", feishunotice.Message{
+	Title: "服务异常",
 	Lines: []string{"状态: HTTP 503"},
 })
+
+err = factory.SendCard(ctx, "release", feishunotice.Card{
+	"schema": "2.0",
+	"body": map[string]any{
+		"elements": []any{
+			map[string]any{"tag": "markdown", "content": "发布完成"},
+		},
+	},
+})
 ```
 
-## service-health 接入
+## 错误处理
 
 ```go
-factory, err := feishunotice.NewFactory(feishunotice.RobotConfig{
-	Name:       feishunotice.Robot("default"),
-	WebhookURL: config.FeishuWebhookURL,
-	Secret:     config.FeishuSecret,
-	Options:    []feishunotice.Option{feishunotice.WithTimeout(config.FeishuHTTPTimeout)},
-})
-if err != nil {
-	return err
+var httpErr feishunotice.HTTPError
+if errors.As(err, &httpErr) {
+	// httpErr.StatusCode / httpErr.Body
+}
+
+var responseErr feishunotice.ResponseError
+if errors.As(err, &responseErr) {
+	// responseErr.Code / responseErr.Message
 }
 ```
-
-## 结构边界
-
-- 根包只暴露调用方需要的 `Client`、`Factory`、`Message`、`Segment`。
-- `internal/feishu` 封装飞书 webhook 协议、签名、HTTP 响应解析。
-- 当前最小支持 `post` 富文本消息；飞书卡片可通过自定义机器人发送，后续应独立增加 `Card` / `SendCard`，不和 `Message` 混用。

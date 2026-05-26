@@ -82,7 +82,7 @@ func (l Locale) String() string {
 // Validate checks whether the message can be sent.
 func (m Message) Validate() error {
 	if strings.TrimSpace(m.Title) == "" {
-		return errors.New("message title is required")
+		return errors.New("消息标题不能为空")
 	}
 	return nil
 }

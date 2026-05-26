@@ -24,7 +24,7 @@ type Client struct {
 // NewClient creates a Feishu protocol client.
 func NewClient(webhookURL string, secret string, httpClient *http.Client, now func() time.Time) (*Client, error) {
 	if strings.TrimSpace(webhookURL) == "" {
-		return nil, errors.New("webhook url is required")
+		return nil, errors.New("机器人地址不能为空")
 	}
 	if httpClient == nil {
 		httpClient = http.DefaultClient
@@ -60,9 +60,9 @@ type Segment struct {
 
 // SendPost sends a post message.
 func (c *Client) SendPost(ctx context.Context, message PostMessage) error {
-	payload := messagePayload{
+	return c.send(ctx, webhookPayload{
 		MsgType: "post",
-		Content: contentPayload{
+		Content: &contentPayload{
 			Post: map[string]postPayload{
 				message.Locale: {
 					Title:   message.Title,
@@ -70,7 +70,15 @@ func (c *Client) SendPost(ctx context.Context, message PostMessage) error {
 				},
 			},
 		},
-	}
+	})
+}
+
+// SendCard sends an interactive card message.
+func (c *Client) SendCard(ctx context.Context, card any) error {
+	return c.send(ctx, webhookPayload{MsgType: "interactive", Card: card})
+}
+
+func (c *Client) send(ctx context.Context, payload webhookPayload) error {
 	if c.secret != "" {
 		timestamp := strconv.FormatInt(c.now().Unix(), 10)
 		payload.Timestamp = timestamp
@@ -108,11 +116,12 @@ func (c *Client) SendPost(ctx context.Context, message PostMessage) error {
 	return nil
 }
 
-type messagePayload struct {
-	MsgType   string         `json:"msg_type"`
-	Content   contentPayload `json:"content"`
-	Timestamp string         `json:"timestamp,omitempty"`
-	Sign      string         `json:"sign,omitempty"`
+type webhookPayload struct {
+	MsgType   string          `json:"msg_type"`
+	Content   *contentPayload `json:"content,omitempty"`
+	Card      any             `json:"card,omitempty"`
+	Timestamp string          `json:"timestamp,omitempty"`
+	Sign      string          `json:"sign,omitempty"`
 }
 
 type contentPayload struct {
@@ -137,9 +146,9 @@ type HTTPError struct {
 
 func (e HTTPError) Error() string {
 	if e.Body == "" {
-		return fmt.Sprintf("feishu status %d", e.StatusCode)
+		return fmt.Sprintf("飞书 HTTP 状态 %d", e.StatusCode)
 	}
-	return fmt.Sprintf("feishu status %d: %s", e.StatusCode, e.Body)
+	return fmt.Sprintf("飞书 HTTP 状态 %d: %s", e.StatusCode, e.Body)
 }
 
 // ResponseError describes a Feishu JSON response whose code is not zero.
@@ -150,7 +159,7 @@ type ResponseError struct {
 
 func (e ResponseError) Error() string {
 	if e.Message == "" {
-		return fmt.Sprintf("feishu code %d", e.Code)
+		return fmt.Sprintf("飞书响应码 %d", e.Code)
 	}
-	return fmt.Sprintf("feishu code %d: %s", e.Code, e.Message)
+	return fmt.Sprintf("飞书响应码 %d: %s", e.Code, e.Message)
 }
